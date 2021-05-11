@@ -73,10 +73,16 @@ func (p *PostgresDriver) Assemble(config drivers.Config) (dbinfo *drivers.DBInfo
 	port := config.DefaultInt(drivers.ConfigPort, 5432)
 	sslmode := config.DefaultString(drivers.ConfigSSLMode, "require")
 	schema := config.DefaultString(drivers.ConfigSchema, "public")
+	schemaPrefixing := config.DefaultString(drivers.ConfigSchemaPrefixing, "default")
 	whitelist, _ := config.StringSlice(drivers.ConfigWhitelist)
 	blacklist, _ := config.StringSlice(drivers.ConfigBlacklist)
 
 	useSchema := schema != "public"
+	if schemaPrefixing == "disable" {
+		useSchema = false
+	} else if schemaPrefixing == "always" {
+		useSchema = true
+	}
 
 	p.connStr = PSQLBuildQueryString(user, pass, dbname, host, port, sslmode)
 	p.conn, err = sql.Open("postgres", p.connStr)

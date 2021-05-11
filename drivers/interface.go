@@ -15,6 +15,7 @@ const (
 	ConfigBlacklist = "blacklist"
 	ConfigWhitelist = "whitelist"
 	ConfigSchema    = "schema"
+	ConfigSchemaPrefixing    = "schema_prefixing"
 
 	ConfigUser    = "user"
 	ConfigPass    = "pass"
