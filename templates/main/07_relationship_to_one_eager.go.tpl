@@ -1,17 +1,17 @@
 {{- if .Table.IsJoinTable -}}
 {{- else -}}
-	{{- range $rel := .Table.ToOneRelationships -}}
-		{{- $ltable := $.Aliases.Table $rel.Table -}}
-		{{- $ftable := $.Aliases.Table $rel.ForeignTable -}}
-		{{- $relAlias := $ftable.Relationship $rel.Name -}}
-		{{- $col := $ltable.Column $rel.Column -}}
-		{{- $fcol := $ftable.Column $rel.ForeignColumn -}}
-		{{- $usesPrimitives := usesPrimitives $.Tables $rel.Table $rel.Column $rel.ForeignTable $rel.ForeignColumn -}}
+	{{- range $fkey := .Table.FKeys -}}
+		{{- $ltable := $.Aliases.Table $fkey.Table -}}
+		{{- $ftable := $.Aliases.Table $fkey.ForeignTable -}}
+		{{- $rel := $ltable.Relationship $fkey.Name -}}
 		{{- $arg := printf "maybe%s" $ltable.UpSingular -}}
-		{{- $canSoftDelete := (getTable $.Tables $rel.ForeignTable).CanSoftDelete }}
-// Load{{$relAlias.Local}} allows an eager lookup of values, cached into the
-// loaded structs of the objects. This is for a 1-1 relationship.
-func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boil.Executor{{else}}ctx context.Context, e boil.ContextExecutor{{end}}, singular bool, {{$arg}} interface{}, mods queries.Applicator) error {
+		{{- $col := $ltable.Column $fkey.Column -}}
+		{{- $fcol := $ftable.Column $fkey.ForeignColumn -}}
+		{{- $usesPrimitives := usesPrimitives $.Tables $fkey.Table $fkey.Column $fkey.ForeignTable $fkey.ForeignColumn -}}
+		{{- $canSoftDelete := (getTable $.Tables $fkey.ForeignTable).CanSoftDelete $.AutoColumns.Deleted }}
+// Load{{$rel.Foreign}} allows an eager lookup of values, cached into the
+// loaded structs of the objects. This is for an N-1 relationship.
+func ({{$ltable.DownSingular}}L) Load{{$rel.Foreign}}({{if $.NoContext}}e boil.Executor{{else}}ctx context.Context, e boil.ContextExecutor{{end}}, singular bool, {{$arg}} interface{}, mods queries.Applicator) error {
 	var slice []*{{$ltable.UpSingular}}
 	var object *{{$ltable.UpSingular}}
 
@@ -26,7 +26,13 @@ func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boi
 		if object.R == nil {
 			object.R = &{{$ltable.DownSingular}}R{}
 		}
+		{{if $usesPrimitives -}}
 		args = append(args, object.{{$col}})
+		{{else -}}
+		if !queries.IsNil(object.{{$col}}) {
+			args = append(args, object.{{$col}})
+		}
+		{{end}}
 	} else {
 		Outer:
 		for _, obj := range slice {
@@ -44,7 +50,13 @@ func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boi
 				}
 			}
 
+			{{if $usesPrimitives -}}
 			args = append(args, obj.{{$col}})
+			{{else -}}
+			if !queries.IsNil(obj.{{$col}}) {
+				args = append(args, obj.{{$col}})
+			}
+			{{end}}
 		}
 	}
 
@@ -54,7 +66,7 @@ func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boi
 
 	query := NewQuery(
 	    qm.From(`{{if $.Dialect.UseSchema}}{{$.Schema}}.{{end}}{{.ForeignTable}}`),
-        qm.WhereIn(`{{if $.Dialect.UseSchema}}{{$.Schema}}.{{end}}{{.ForeignTable}}.{{.ForeignColumn}} in ?`, args...),
+	    qm.WhereIn(`{{if $.Dialect.UseSchema}}{{$.Schema}}.{{end}}{{.ForeignTable}}.{{.ForeignColumn}} in ?`, args...),
 	    {{if and $.AddSoftDeletes $canSoftDelete -}}
 	    qmhelper.WhereIsNull(`{{if $.Dialect.UseSchema}}{{$.Schema}}.{{end}}{{.ForeignTable}}.deleted_at`),
 	    {{- end}}
@@ -100,13 +112,18 @@ func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boi
 
 	if singular {
 		foreign := resultSlice[0]
-		object.R.{{$relAlias.Local}} = foreign
+		object.R.{{$rel.Foreign}} = foreign
 		{{if not $.NoBackReferencing -}}
 		if foreign.R == nil {
 			foreign.R = &{{$ftable.DownSingular}}R{}
 		}
-		foreign.R.{{$relAlias.Foreign}} = object
+			{{if $fkey.Unique -}}
+		foreign.R.{{$rel.Local}} = object
+			{{else -}}
+		foreign.R.{{$rel.Local}} = append(foreign.R.{{$rel.Local}}, object)
+			{{end -}}
 		{{end -}}
+		return nil
 	}
 
 	for _, local := range slice {
@@ -116,12 +133,16 @@ func ({{$ltable.DownSingular}}L) Load{{$relAlias.Local}}({{if $.NoContext}}e boi
 			{{else -}}
 			if queries.Equal(local.{{$col}}, foreign.{{$fcol}}) {
 			{{end -}}
-				local.R.{{$relAlias.Local}} = foreign
+				local.R.{{$rel.Foreign}} = foreign
 				{{if not $.NoBackReferencing -}}
 				if foreign.R == nil {
 					foreign.R = &{{$ftable.DownSingular}}R{}
 				}
-				foreign.R.{{$relAlias.Foreign}} = local
+					{{if $fkey.Unique -}}
+				foreign.R.{{$rel.Local}} = local
+					{{else -}}
+				foreign.R.{{$rel.Local}} = append(foreign.R.{{$rel.Local}}, local)
+					{{end -}}
 				{{end -}}
 				break
 			}
